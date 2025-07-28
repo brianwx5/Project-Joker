@@ -1,0 +1,241 @@
+```typescript
+import { TextFile, typescript } from 'projen'
+
+export function configureHusky(project: typescript.TypeScriptProject) {
+  const preCommitHook = `# Run in parallel for speed\nnpm-run-all --parallel lint:fix format test:quick\n`
+  new TextFile(project, '.husky/pre-commit', {
+    lines: [preCommitHook],
+    executable: true,
+  })
+
+  const prePushHook = `npm run lint\n`
+  new TextFile(project, '.husky/pre-push', {
+    lines: [prePushHook],
+    executable: true,
+  })
+
+  const huskyCmd = 'husky'
+  project.addTask('husky:init', { exec: huskyCmd })
+  const currentPrepTask = project.tasks.tryFind('prepare')
+  if (!currentPrepTask) {
+    project.addTask('prepare', { exec: huskyCmd })
+  } else {
+    currentPrepTask.exec(huskyCmd)
+  }
+  project.addPackageIgnore('.husky/')
+}
+
+export function configureESLint(project: typescript.TypeScriptProject) {
+  project.eslint?.addPlugins('simple-import-sort')
+  project.eslint?.addExtends('plugin:@typescript-eslint/recommended')
+  project.eslint?.addRules({
+    semi: ['off'],
+    'import/order': ['off'],
+    'import/no-unresolved': ['off'],
+    '@typescript-eslint/consistent-type-imports': ['off'],
+    'simple-import-sort/imports': ['error'],
+    'simple-import-sort/exports': ['error'],
+    '@typescript-eslint/no-misused-promises': ['error'],
+    'no-duplicate-imports': ['error'],
+    '@typescript-eslint/no-shadow': ['warn'],
+    '@typescript-eslint/return-await': ['warn'],
+    '@typescript-eslint/no-unused-vars': [
+      'error',
+      {
+        args: 'all',
+        argsIgnorePattern: '^_',
+        caughtErrors: 'all',
+        caughtErrorsIgnorePattern: '^_',
+        destructuredArrayIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        ignoreRestSiblings: true,
+      },
+    ],
+    '@typescript-eslint/switch-exhaustiveness-check': 'error',
+  })
+  project.eslint?.allowDevDeps('**/?(*.)+(spec|test).+(ts|tsx|js)')
+  project.eslint?.allowDevDeps('**/test/**')
+}
+
+export function configurePrettier(project: typescript.TypeScriptProject) {
+  project.addDevDeps('eslint-plugin-prettier@^5.0.1')
+  project.addDevDeps('prettier@^3.0.0')
+}
+
+export function configureNvmrc(project: typescript.TypeScriptProject, version = '22.0.0') {
+  new TextFile(project, '.nvmrc', {
+    lines: [version],
+  })
+}
+
+export function configureDualTsconfigs(project: typescript.TypeScriptProject) {
+  new TextFile(project, 'tsconfig.esm.json', {
+    lines: [
+      '{',
+      '  "extends": "./tsconfig.json",',
+      '  "compilerOptions": {',
+      '    "outDir": "lib/esm",',
+      '    "module": "ESNext",',
+      '    "moduleResolution": "node"',
+      '  }',
+      '}',
+    ],
+  })
+  new TextFile(project, 'tsconfig.cjs.json', {
+    lines: [
+      '{',
+      '  "extends": "./tsconfig.json",',
+      '  "compilerOptions": {',
+      '    "outDir": "lib/cjs",',
+      '    "module": "CommonJS"',
+      '  }',
+      '}',
+    ],
+  })
+}
+```
+
+
+```typescript
+TypescriptConfig, TypescriptConfigExtends } from 'projen/lib/javascript'
+import {
+  configureHusky,
+  configureESLint,
+  configurePrettier,
+  configureNvmrc,
+  configureDualTsconfigs,
+} from './project-config'
+
+const project = new typescript.TypeScriptProject({
+  defaultReleaseBranch: 'main',
+  name: 'jokerutils',
+  projenrcTs: true,
+  packageManager: NodePackageManager.NPM,
+  packageName: '@joker/utils',
+  description: 'Joker Utilities',
+  workflowNodeVersion: '22',
+  typescriptVersion: '5.7.x',
+  package: true,
+  release: true,
+  releaseToNpm: true,
+  jsiiReleaseVersion: 'latest',
+  tsconfig: {
+    compilerOptions: {
+      module: 'CommonJS',
+      moduleResolution: TypeScriptModuleResolution.NODE_NEXT,
+      target: 'CommonJS',
+      outDir: 'lib',
+      rootDir: 'src',
+      declaration: true,
+      declarationMap: true,
+      sourceMap: true,
+      esModuleInterop: true,
+      skipLibCheck: true,
+    },
+  },
+  prettierOptions: {
+    settings: {
+      printWidth: 120,
+      tabWidth: 2,
+      semi: false,
+      singleQuote: true,
+      bracketSpacing: true,
+      trailingComma: javascript.TrailingComma.ES5,
+      arrowParens: javascript.ArrowParens.AVOID,
+      useTabs: false,
+    },
+  },
+  eslint: true,
+  prettier: true,
+  jest: true,
+  codeCov: true,
+  docgen: true,
+  deps: [],
+  devDeps: [
+    'husky',
+    'esbuild',
+    'tsx',
+    '@types/node',
+    'npm-run-all',
+    'source-map-support',
+    'eslint-plugin-simple-import-sort',
+    'eslint-plugin-prettier@^5.0.1',
+    'prettier@^3.0.0',
+  ],
+})
+
+project.addFields({
+  sideEffects: false,
+  exports: {
+    import: './lib/esm/index.js',
+    require: './lib/cjs/index.js',
+    types: './lib/esm/index.d.ts',
+  },
+  main: './lib/cjs/index.js',
+  module: './lib/esm/index.js',
+})
+
+project.addScripts({
+  bundle: 'esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/bundle.js --sourcemap',
+  'bundle:min':
+    'esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/bundle.min.js --minify --sourcemap',
+  prepack: 'npm run bundle && npm run bundle:min',
+  'lint:fix': 'eslint --fix src/**/*.ts',
+  'test:quick': 'jest --passWithNoTests --findRelatedTests',
+  'test:ci': 'jest --ci --coverage',
+  docs: 'typedoc --out docs src/index.ts',
+  'build:esm': 'tsc --build tsconfig.esm.json',
+  'build:cjs': 'tsc --build tsconfig.cjs.json',
+    build: 'npm run build:esm && npm run build:cjs',
+  })
+
+project.synth()
+
+// Fix for ts-node ESM issues in Node 18.19+ (https://github.com/projen/projen/issues/3388)
+const PROJEN_TSCONFIG_FILENAME = "tsconfig.projenrc.json"
+if (project.defaultTask) {
+  // Reset compiler options for projen-specific tsconfig
+  const RESET_COMPILER_OPTIONS = {
+    noEmit: true,
+    emitDeclarationOnly: false,
+  }
+
+  // Add a secondary projenrc-specific tsconfig file that doesn't emit JS
+  const projenTsconfig = new TypescriptConfig(project, {
+    fileName: PROJEN_TSCONFIG_FILENAME,
+    include: [
+      ".projenrc.ts",
+      "projenrc/**/*.ts", // added by projen for tsconfig.dev - gives a place for projenrc included files
+    ],
+    extends: TypescriptConfigExtends.fromTypescriptConfigs([
+      project.tsconfigDev,
+    ]),
+    compilerOptions: {
+      ...RESET_COMPILER_OPTIONS,
+      noEmit: true,
+      emitDeclarationOnly: false,
+    },
+  })
+
+  // Adjust the projen command to:
+  // 1. run tsc to typecheck and syntax check the file
+  project.defaultTask.reset(`tsc --project ${projenTsconfig.fileName}`)
+
+  // 2. use the projenrc-specific tsconfig and tsx
+  project.defaultTask.exec(
+    `tsx --tsconfig ${projenTsconfig.fileName} .projenrc.ts`,
+  )
+  project.defaultTask.description =
+    "Run projen with tsx (workaround for Node 18.19+ applied)"
+}
+
+// Abstracted configuration
+configureHusky(project)
+configureESLint(project)
+configurePrettier(project)
+configureNvmrc(project, '22.0.0')
+configureDualTsconfigs(project)
+
+
+project.synth()
+```
